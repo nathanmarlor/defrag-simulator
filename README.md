@@ -1,8 +1,8 @@
-# 💾 Disk Defragmenter
+# 💾 MS-DOS Defrag
 
-A faithful browser recreation of the classic Windows 95 Disk Defragmenter screen.
+A faithful browser recreation of the MS-DOS 6.22 Disk Defragmenter — full-screen text-mode aesthetic.
 
-Watch the blocks dance as fragmented files (red) are reorganized into contiguous optimized blocks (cyan), while system files (dark blue) stay put.
+Watch fragmented files (red blocks) reorganize into contiguous optimized clusters (cyan), while system files (blue) stay locked in place. Resize your browser — it scales to any screen.
 
 **[▶️ Live Demo](https://nathanmarlor.github.io/defrag-simulator/)**
 
