@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-  <title>MS-DOS Defrag</title>
+  <title>Microsoft Defrag for MS-DOS</title>
   <script>p5.disableFriendlyErrors = true;</script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.11.3/p5.min.js"></script>
   <style>
@@ -13,68 +13,67 @@
 </head>
 <body>
 <script>
-// ── Color palette (VGA text-mode inspired) ──
-const BG   = '#000028';
-const FG   = '#A8A8A8';
-const FREE_CLR     = '#555555';
-const SYSTEM_CLR   = '#0000FF';
-const FRAG_CLR     = '#FF0000';
-const CONTIG_CLR   = '#00AAAA';
-const MOVING_CLR   = '#FFFF00';
-const BORDER_CLR   = '#4488AA';
+// ── DOS Color Palette ──
+const DOS_BLUE      = '#0000A8';
+const DOS_WHITE     = '#A8A8A8';
+const DOS_BRIGHT    = '#FFFFFF';
+const DOS_RED       = '#FF0000';
+const DOS_GREEN     = '#00AA00';
+const DOS_YELLOW    = '#FFFF00';
+const DOS_CYAN      = '#00AAAA';
+const DOS_DARKGRAY  = '#545454';
 
 // ── Cell states ──
 const FREE = 0, SYSTEM = 1, FRAG = 2, CONTIG = 3;
 
-// ── Globals ──
-let grid, fileMap, fragFiles;
+// ── Block characters ──
+const CH_FREE   = '░';  // U+2591 light shade
+const CH_FRAG   = '▓';  // U+2593 dark shade
+const CH_CONTIG = '█';  // U+2588 full block
+const CH_SYSTEM = '█';
+const CH_MOVING = '█';
+
+// ── Character grid dimensions (computed at runtime) ──
+let COLS, ROWS, cellW, cellH, fontSize;
+let gridData, fileMap, fragFiles;
 let moveQueue = [];
 let movingCells = new Set();
 let totalFragBlocks = 1, movedBlocks = 0;
-let done = false;
-let COLS, ROWS, CELL, GAP, CSIZE;
-let gridX, gridY;
-let charW, charH, fontSize;
-let lastW = 0, lastH = 0;
+let done = false, paused = false;
+let flashOn = true;
+let mapCol, mapRow, mapW, mapH;
+let lastW = -1, lastH = -1;
 
 function setup() {
   createCanvas(windowWidth, windowHeight);
   pixelDensity(1);
-  frameRate(30);
-  noStroke();
   textFont('Courier New, Courier, monospace');
-
+  noStroke();
   computeLayout();
   initDisk();
 }
 
 function computeLayout() {
-  // Calculate font size based on viewport
-  fontSize = constrain(floor(min(width, height) / 42), 8, 18);
+  // Fit 80×25 text mode to viewport
+  fontSize = constrain(floor(min(width / 81, height / 26.5)), 6, 24);
   textSize(fontSize);
-  charW = textWidth('X');
-  charH = fontSize * 1.2;
+  cellW = textWidth('X');
+  cellH = fontSize * 1.25;
 
-  // Reserve space for header (4 lines) and footer (5 lines)
-  let headerH = charH * 4;
-  let footerH = charH * 5;
-  let availW = width - charW * 4;
-  let availH = height - headerH - footerH - charH * 2;
+  COLS = floor(width / cellW);
+  ROWS = floor(height / cellH);
 
-  // Grid sizing
-  CELL = constrain(floor(min(availW / 52, availH / 30)), 4, 14);
-  GAP = CELL > 6 ? 1 : 0;
-  CSIZE = CELL + GAP;
-
-  COLS = floor(availW / CSIZE);
-  ROWS = floor(availH / CSIZE);
-
-  gridX = floor((width - COLS * CSIZE) / 2);
-  gridY = floor(headerH + charH);
+  // Disk map bounds (character coordinates, 0-based)
+  mapCol = 3;
+  mapRow = 5;
+  mapW = COLS - 8;
+  mapH = ROWS - 12;
+  if (mapW < 20) mapW = 20;
+  if (mapH < 6) mapH = 6;
 }
 
 function initDisk() {
-  grid = new Array(ROWS).fill(null).map(() => new Array(COLS).fill(FREE));
+  gridData = new Array(mapH).fill(null).map(() => new Array(mapW).fill(FREE));
   fileMap = {};
   fragFiles = [];
   moveQueue = [];
@@ -83,37 +82,33 @@ function initDisk() {
   totalFragBlocks = 1;
   done = false;
 
-  // System blocks (~8%)
-  let sysCount = floor(ROWS * COLS * 0.08);
+  // System blocks (~6%)
+  let sysCount = floor(mapW * mapH * 0.06);
   for (let i = 0; i < sysCount; i++) {
-    let r = floor(random(ROWS));
-    let c = floor(random(COLS));
-    if (grid[r][c] === FREE) grid[r][c] = SYSTEM;
+    let r = floor(random(mapH));
+    let c = floor(random(mapW));
+    if (gridData[r][c] === FREE) gridData[r][c] = SYSTEM;
   }
 
   // Place files
-  let fileId = 0;
-  let placed = 0;
-  let targetUsed = floor(ROWS * COLS * 0.70);
+  let fileId = 0, placed = 0;
+  let target = floor(mapW * mapH * 0.72);
 
-  while (placed < targetUsed && fileId < 30) {
-    let size = floor(random(6, 30));
-    size = min(size, targetUsed - placed);
+  while (placed < target && fileId < 35) {
+    let size = floor(random(4, max(5, floor(mapW * mapH / 80))));
+    size = min(size, target - placed);
     if (size < 3) break;
 
-    let isFrag = random() < 0.45;
-
-    if (isFrag) {
-      let blocks = [];
-      let attempts = 0;
-      while (blocks.length < size && attempts < 600) {
-        let r = floor(random(ROWS));
-        let c = floor(random(COLS));
-        if (grid[r][c] === FREE) {
-          grid[r][c] = FRAG;
+    if (random() < 0.45) {
+      // Fragmented
+      let blocks = [], tries = 0;
+      while (blocks.length < size && tries < 800) {
+        let r = floor(random(mapH)), c = floor(random(mapW));
+        if (gridData[r][c] === FREE) {
+          gridData[r][c] = FRAG;
           blocks.push({r, c});
         }
-        attempts++;
+        tries++;
       }
       if (blocks.length >= 3) {
         fileMap[fileId] = {blocks, contiguous: false};
@@ -123,15 +118,16 @@ function initDisk() {
         fileId++;
       }
     } else {
-      let r = floor(random(ROWS));
-      let startC = floor(random(max(1, COLS - size)));
-      let ok = startC + size <= COLS;
+      // Contiguous
+      let r = floor(random(mapH));
+      let startC = floor(random(max(1, mapW - size)));
+      let ok = startC + size <= mapW;
       for (let dc = 0; ok && dc < size; dc++)
-        if (grid[r][startC + dc] !== FREE) ok = false;
+        if (gridData[r][startC + dc] !== FREE) ok = false;
       if (ok) {
         let blocks = [];
         for (let dc = 0; dc < size; dc++) {
-          grid[r][startC + dc] = CONTIG;
+          gridData[r][startC + dc] = CONTIG;
           blocks.push({r, c: startC + dc});
         }
         fileMap[fileId] = {blocks, contiguous: true};
@@ -144,10 +140,10 @@ function initDisk() {
 }
 
 function findFreeRun(len) {
-  for (let r = 0; r < ROWS; r++) {
+  for (let r = 0; r < mapH; r++) {
     let start = -1, run = 0;
-    for (let c = 0; c < COLS; c++) {
-      if (grid[r][c] === FREE) {
+    for (let c = 0; c < mapW; c++) {
+      if (gridData[r][c] === FREE) {
         if (start === -1) start = c;
         run++;
         if (run >= len) return {r, c: start};
@@ -173,122 +169,221 @@ function queueFileMove(fileId) {
   return true;
 }
 
+function consolidateFree() {
+  for (let fid in fileMap) {
+    let f = fileMap[fid];
+    if (!f.contiguous) continue;
+    let blocks = f.blocks;
+    let r = blocks[0].r;
+    let gap = 0;
+    for (let c = blocks[0].c - 1; c >= 0; c--) {
+      if (gridData[r][c] === FREE) gap++; else break;
+    }
+    if (gap > 0) {
+      for (let b of blocks) gridData[b.r][b.c] = FREE;
+      for (let i = 0; i < blocks.length; i++) {
+        let nc = blocks[i].c - gap;
+        gridData[r][nc] = CONTIG;
+        blocks[i] = {r, c: nc};
+      }
+    }
+  }
+}
+
 function draw() {
-  // Resize handling
   if (width !== lastW || height !== lastH) {
     lastW = width; lastH = height;
     computeLayout();
     initDisk();
   }
 
-  background(BG);
+  // Flash toggle for read/write blocks
+  flashOn = frameCount % 10 < 7;
+
+  background(DOS_BLUE);
   textAlign(LEFT, TOP);
   textSize(fontSize);
 
-  drawHeader();
-  drawGrid();
+  drawBorders();
+  drawMenuBar();
+  drawDriveInfo();
+  drawDiskMap();
   drawLegend();
-  drawFooter();
+  drawStatusBar();
 
-  processMoves();
+  if (!done && !paused) processMoves();
 }
 
-function drawHeader() {
-  let x = charW;
-  let y = charH * 0.5;
+function chX(c) { return mapCol + c + 1; }
+function chY(r) { return mapRow + r + 1 + 2; }  // +2 for the map border/header
 
-  fill(FG);
-  text('Microsoft Defrag for MS-DOS', x, y);
-  text('Version 6.22', width - charW * 14, y);
+function drawBorders() {
+  fill(DOS_CYAN);
+  textSize(fontSize);
+  textAlign(LEFT, TOP);
 
-  y += charH * 1.2;
-  text('Cluster size = 2,048 bytes     Drive C:  ' + (ROWS * COLS) + ' clusters', x, y);
+  // Top double border
+  let top = '╔' + '═'.repeat(COLS - 2) + '╗';
+  text(top, 0, 0);
 
-  y += charH * 1.2;
-  let pct = floor((movedBlocks / max(totalFragBlocks, 1)) * 100);
-  // Progress bar
-  let barW = 30;
-  let doneChars = floor(pct / 100 * barW);
-  text('Progress: ', x, y);
-  fill('#00AA00');
-  let barStr = '█'.repeat(doneChars) + '░'.repeat(barW - doneChars);
-  text(barStr, x + textWidth('Progress: '), y);
-  fill(FG);
-  text('  ' + pct + '%', x + textWidth('Progress: ') + textWidth(barStr), y);
+  // Bottom double border
+  let bot = '╚' + '═'.repeat(COLS - 2) + '╝';
+  text(bot, 0, (ROWS - 1) * cellH);
 
-  // Grid border
-  y = gridY - charH * 0.3;
-  stroke(BORDER_CLR);
-  strokeWeight(1);
-  noFill();
-  rect(gridX - 2, gridY - 2, COLS * CSIZE + 4, ROWS * CSIZE + 4);
-  noStroke();
+  // Side borders
+  for (let r = 1; r < ROWS - 1; r++) {
+    text('║', 0, r * cellH);
+    text('║', (COLS - 1) * cellW, r * cellH);
+  }
+
+  // Single-line border around disk map
+  let mLeft = mapCol * cellW;
+  let mTop = (mapRow + 1) * cellH;
+  let mRight = (mapCol + mapW + 1) * cellW;
+  let mBot = (mapRow + mapH + 2) * cellH;
+
+  fill(DOS_CYAN);
+  // Top of map border
+  text('┌' + '─'.repeat(mapW) + '┐', mLeft, mTop);
+  // Bottom of map border
+  text('└' + '─'.repeat(mapW) + '┘', mLeft, mBot);
+  // Sides
+  for (let r = 0; r < mapH; r++) {
+    text('│', mLeft, mTop + (r + 1) * cellH);
+    text('│', mRight, mTop + (r + 1) * cellH);
+  }
 }
 
-function drawGrid() {
-  let x = gridX, y = gridY;
-  noStroke();
-  for (let r = 0; r < ROWS; r++) {
-    for (let c = 0; c < COLS; c++) {
+function drawMenuBar() {
+  fill(DOS_WHITE);
+  textAlign(LEFT, TOP);
+  textSize(fontSize);
+
+  let y = cellH;
+  let items = '  Optimize  Configure  Help';
+  text(items, cellW, y);
+
+  // Underline shortcut letters
+  fill(DOS_BRIGHT);
+  text('O', cellW + 2 * cellW, y);
+  text('C', cellW + 12 * cellW, y);
+  text('H', cellW + 23 * cellW, y);
+}
+
+function drawDriveInfo() {
+  fill(DOS_BRIGHT);
+  textSize(fontSize);
+  textAlign(LEFT, TOP);
+
+  let y = cellH * 3;
+  let info = '  Cluster 2' + ' '.repeat(mapW - 20) + (mapW * mapH);
+  text(info, (mapCol + 1) * cellW, y);
+}
+
+function drawDiskMap() {
+  textSize(fontSize);
+  textAlign(LEFT, TOP);
+
+  let x0 = (mapCol + 1) * cellW;
+  let y0 = (mapRow + 2) * cellH;
+
+  // Draw the grid as text characters
+  let lineBuf = new Array(mapW);
+
+  for (let r = 0; r < mapH; r++) {
+    for (let c = 0; c < mapW; c++) {
       let key = r + ',' + c;
-      let clr;
-      if (movingCells.has(key)) {
-        clr = MOVING_CLR;
-      } else {
-        switch (grid[r][c]) {
-          case FREE:   clr = FREE_CLR; break;
-          case SYSTEM: clr = SYSTEM_CLR; break;
-          case FRAG:   clr = FRAG_CLR; break;
-          case CONTIG: clr = CONTIG_CLR; break;
-        }
+
+      if (movingCells.has(key) && flashOn) {
+        lineBuf[c] = {ch: CH_MOVING, clr: DOS_YELLOW};
+        continue;
       }
-      fill(clr);
-      rect(x + c * CSIZE, y + r * CSIZE, CELL, CELL);
+
+      switch (gridData[r][c]) {
+        case FREE:
+          lineBuf[c] = {ch: CH_FREE, clr: DOS_DARKGRAY};
+          break;
+        case SYSTEM:
+          lineBuf[c] = {ch: CH_SYSTEM, clr: DOS_GREEN};
+          break;
+        case FRAG:
+          lineBuf[c] = {ch: CH_FRAG, clr: DOS_RED};
+          break;
+        case CONTIG:
+          lineBuf[c] = {ch: CH_CONTIG, clr: DOS_BRIGHT};
+          break;
+      }
+    }
+
+    // Render each cell individually for color accuracy
+    for (let c = 0; c < mapW; c++) {
+      fill(lineBuf[c].clr);
+      text(lineBuf[c].ch, x0 + c * cellW, y0 + r * cellH);
     }
   }
 }
 
 function drawLegend() {
-  let y = gridY + ROWS * CSIZE + charH;
-  let x = charW;
-  let items = [
-    {clr: FREE_CLR,   label: 'Free'},
-    {clr: SYSTEM_CLR, label: 'System'},
-    {clr: FRAG_CLR,   label: 'Fragmented'},
-    {clr: CONTIG_CLR, label: 'Optimized'},
-    {clr: MOVING_CLR, label: 'Moving'},
-  ];
-
-  noStroke();
+  let y = (mapRow + mapH + 3) * cellH;
+  let x = (mapCol + 1) * cellW;
+  textSize(fontSize);
   textAlign(LEFT, TOP);
-  let cx = x;
-  for (let i = 0; i < items.length; i++) {
-    fill(items[i].clr);
-    rect(cx, y + 2, fontSize * 0.8, fontSize * 0.8);
-    fill(FG);
-    text(' ' + items[i].label + '  ', cx + fontSize, y);
-    cx += textWidth(' ' + items[i].label + '  ') + fontSize;
+
+  // Line 1
+  fill(DOS_BRIGHT);  text('█', x, y);
+  fill(DOS_WHITE);   text(' - Used    ', x + cellW, y);
+  fill(DOS_DARKGRAY); text('░', x + 12*cellW, y);
+  fill(DOS_WHITE);   text(' - Unused    ', x + 13*cellW, y);
+  fill(DOS_RED);     text('▓', x + 27*cellW, y);
+  fill(DOS_WHITE);   text(' - Fragmented', x + 28*cellW, y);
+
+  // Line 2
+  y += cellH;
+  fill(DOS_GREEN);   text('█', x, y);
+  fill(DOS_WHITE);   text(' - System    ', x + cellW, y);
+  fill(DOS_YELLOW);  text('█', x + 14*cellW, y);
+  fill(DOS_WHITE);   text(' - Read/Write   ', x + 15*cellW, y);
+  if (done) {
+    fill(DOS_GREEN);
+    text('Done!', x + 35*cellW, y);
   }
 }
 
-function drawFooter() {
-  let y = height - charH * 2;
-  let x = charW;
+function drawStatusBar() {
+  let y = (ROWS - 2) * cellH;
+  let x = cellW;
+  let pct = floor((movedBlocks / max(totalFragBlocks, 1)) * 100);
 
-  fill(FG);
-  textAlign(LEFT, BOTTOM);
+  textSize(fontSize);
+  textAlign(LEFT, TOP);
 
-  if (done) {
-    fill('#00FF00');
-    text('Defragmentation complete.  Press any key or tap to restart.', x, y);
+  // Progress bar using block chars
+  let barW = 20;
+  let doneW = floor(pct / 100 * barW);
+  fill(DOS_BRIGHT);
+  text('█'.repeat(doneW), x, y);
+  fill(DOS_DARKGRAY);
+  text('░'.repeat(barW - doneW), x + doneW * cellW, y);
+
+  // Percentage
+  fill(DOS_BRIGHT);
+  text(' ' + pct + '% complete', x + (barW + 1) * cellW, y);
+
+  // Esc to stop
+  if (!done) {
+    fill(DOS_WHITE);
+    let esc = 'Esc=Stop';
+    text(esc, (COLS - esc.length - 1) * cellW, y);
   } else {
-    text('F1=Help  F10=Exit  ESC=Stop Defrag', x, y);
-  }
+    fill(DOS_YELLOW);
+    let dn = 'Tap to restart';
+    text(dn, (COLS - dn.length - 1) * cellW, y);
 
-  // Blinking cursor
-  if (done && frameCount % 40 < 20) {
-    fill(FG);
-    text('█', x + textWidth('Defragmentation complete.  Press any key or tap to restart.'), y);
+    // Blinking cursor
+    if (frameCount % 40 < 20) {
+      fill(DOS_BRIGHT);
+      text('█', (COLS - 1) * cellW, y);
+    }
   }
 }
 
@@ -300,12 +395,11 @@ function processMoves() {
     if (fragFiles.length === 0) { done = true; return; }
     let fid = fragFiles.shift();
     if (!queueFileMove(fid)) {
+      consolidateFree();
       if (fragFiles.length > 0) {
         queueFileMove(fragFiles.shift());
       } else {
-        // Try to consolidate free space: pick a contiguous file and "slide" it left
-        consolidateFree();
-        if (fragFiles.length === 0) { done = true; return; }
+        done = true;
       }
     }
     return;
@@ -314,15 +408,15 @@ function processMoves() {
   let mv = moveQueue[0];
   switch (mv.phase) {
     case 0:
-      mv.phase = 1; mv.timer = 2;
+      mv.phase = 1; mv.timer = 3;
       movingCells.add(mv.fromR + ',' + mv.fromC);
       break;
     case 1:
       mv.timer--;
       movingCells.add(mv.fromR + ',' + mv.fromC);
       if (mv.timer <= 0) {
-        grid[mv.fromR][mv.fromC] = FREE;
-        mv.phase = 2; mv.timer = 2;
+        gridData[mv.fromR][mv.fromC] = FREE;
+        mv.phase = 2; mv.timer = 3;
         movingCells.add(mv.toR + ',' + mv.toC);
       }
       break;
@@ -330,7 +424,7 @@ function processMoves() {
       mv.timer--;
       movingCells.add(mv.toR + ',' + mv.toC);
       if (mv.timer <= 0) {
-        grid[mv.toR][mv.toC] = CONTIG;
+        gridData[mv.toR][mv.toC] = CONTIG;
         fileMap[mv.fileId].blocks = fileMap[mv.fileId].blocks.map(b =>
           (b.r === mv.fromR && b.c === mv.fromC) ? {r: mv.toR, c: mv.toC} : b
         );
@@ -342,36 +436,17 @@ function processMoves() {
   }
 }
 
-function consolidateFree() {
-  // Slide contiguous files left to consolidate free space at the right
-  for (let fid in fileMap) {
-    let f = fileMap[fid];
-    if (!f.contiguous) continue;
-    let blocks = f.blocks;
-    // Find leftmost free space
-    let minC = blocks[0].c;
-    let gap = 0;
-    for (let c = minC - 1; c >= 0; c--) {
-      if (grid[blocks[0].r][c] === FREE) gap++;
-      else break;
-    }
-    if (gap > 0) {
-      // Move file left by gap
-      let r = blocks[0].r;
-      for (let b of blocks) grid[b.r][b.c] = FREE;
-      for (let i = 0; i < blocks.length; i++) {
-        let nc = blocks[i].c - gap;
-        grid[r][nc] = CONTIG;
-        blocks[i] = {r, c: nc};
-      }
-    }
-  }
-}
-
 function mousePressed() { initDisk(); }
-function keyPressed() { initDisk(); }
+function keyPressed() {
+  if (key === ' ' || key === 'p') { paused = !paused; return; }
+  initDisk();
+}
 function touchStarted() { initDisk(); return false; }
-function windowResized() { resizeCanvas(windowWidth, windowHeight); }
+function windowResized() {
+  resizeCanvas(windowWidth, windowHeight);
+  computeLayout();
+  initDisk();
+}
 </script>
 </body>
 </html>

@@ -1,8 +1,8 @@
-# 💾 MS-DOS Defrag
+# 💾 MS-DOS 6.22 Defrag
 
-A faithful browser recreation of the MS-DOS 6.22 Disk Defragmenter — full-screen text-mode aesthetic.
+Pixel-perfect browser recreation of `DEFRAG.EXE` from MS-DOS 6.22 — licensed from Norton SpeedDisk by Symantec.
 
-Watch fragmented files (red blocks) reorganize into contiguous optimized clusters (cyan), while system files (blue) stay locked in place. Resize your browser — it scales to any screen.
+**Block characters. Box-drawing borders. Blue screen. Norton menu bar. Exactly how you remember it.**
 
 **[▶️ Live Demo](https://nathanmarlor.github.io/defrag-simulator/)**
 
