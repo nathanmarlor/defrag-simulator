@@ -1,0 +1,13 @@
+{
+  "name": "defrag-simulator",
+  "version": "1.0.0",
+  "description": "MS-DOS 6.22 Defrag simulator",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.0.3"
+  },
+  "license": "MIT"
+}
