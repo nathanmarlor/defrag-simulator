@@ -7,6 +7,7 @@ COPY . /app
 # Stage 2: Serve with nginx, non-root user
 FROM nginx:alpine
 COPY --from=builder /app /usr/share/nginx/html
+COPY default.conf /etc/nginx/conf.d/default.conf
 RUN addgroup -S appuser && adduser -S appuser -G appuser
 USER appuser
 EXPOSE 80
